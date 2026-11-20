@@ -1,4 +1,4 @@
-# 对话收尾 · dsh-session-wrapup
+# 会话收尾 · dsh-session-wrapup
 
 给 DeepSeek Harness（DSH）加一颗「🧹 收尾」按钮：**把这次对话在工作区里产生的文件全摆出来，分好类、标好重要性，勾一下收进回收站；会话本身也能一起收尾。**
 
@@ -18,19 +18,13 @@
 
 ## 安装
 
-DSH 的插件是「bundle」：一个带 `cordis.patch.yml` 的 npm 包。把仓库克隆到任意目录（比如 `D:\工具\AI\成品库\dsh-session-wrapup`）：
-
-```bash
-git clone https://github.com/1Tohka0/dsh-session-wrapup.git
-```
-
-然后让 DSH 装上它：
+DSH 的插件是「bundle」：一个带 `cordis.patch.yml` 的 npm 包。把仓库克隆到任意目录，然后让 DSH 装上它：
 
 ```
 plugin_manager install_bundle   target = <本仓库的绝对路径>
 ```
 
-装完在插件列表里能看到 **对话收尾**（entryId 形如 `include:dsh-session-wrapup`），图标是一把蓝扫帚。
+装完在插件列表里能看到 **会话收尾**（entryId 形如 `include:dsh-session-wrapup`），图标是一把蓝扫帚。
 
 也可以手动写进 `$DSH_HOME/profiles/<profile>/package.json` 的依赖：
 
