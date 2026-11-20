@@ -1,7 +1,7 @@
 {
   "meta": {
-    "title": "Session wrap-up",
-    "description": "Adds a “Wrap up” button beside the conversation title: lists every file this conversation produced, groups them by purpose, lets you tick what to delete, and can queue the session itself for cleanup.",
+    "title": "Conversation wrap-up",
+    "description": "Cleans up after a chat. A “Wrap up” button beside the title lists every file this conversation produced in the workspace, grouped into deliverables / drafts / scripts / temp files with a one-line reason for each, and moves the ticked ones to the recycle bin. Queue the session itself and it is removed once idle for 30 minutes. Workspace only; never DSH data or system files.",
     "detail": "docs/DETAIL.md"
   }
 }

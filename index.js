@@ -22,7 +22,7 @@ import { HOME, IDLE_DELETE_MS, IDLE_REFUSE_MS, PATHS, isValidSessionId, normPath
 export const name = 'wrapup-panel'
 export const inject = ['webServer']
 
-const VERSION = '1.0.0'
+const VERSION = '1.0.1'
 const MAX_BODY = 1024 * 1024
 const PREFIX = '/wrapup-panel'
 
