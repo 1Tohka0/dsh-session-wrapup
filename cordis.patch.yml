@@ -1,0 +1,5 @@
+# 把插件插进 DSH 的应用树。
+# id 可以随便起，但不要和别的插件重名；name 必须是 package.json 里的包名。
+- insert:
+    - id: dsh-session-wrapup
+      name: dsh-session-wrapup

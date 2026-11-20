@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Session wrap-up",
+    "description": "Adds a “Wrap up” button beside the conversation title: lists every file this conversation produced, groups them by purpose, lets you tick what to delete, and can queue the session itself for cleanup.",
+    "detail": "docs/DETAIL.md"
+  }
+}

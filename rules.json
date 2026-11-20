@@ -1,0 +1,17 @@
+{
+  "_说明": "会话收尾的分类规则。插件自带的这份是默认值；想改就在 $DSH_HOME/state/wrapup-rules.json 里只写要覆盖的那几项。",
+  "_deliverableExt": "这些后缀算交付物 → 默认保留",
+  "deliverableExt": [".pptx", ".ppt", ".xlsx", ".xls", ".docx", ".doc", ".pdf", ".key", ".pages", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".mp4", ".mov", ".mp3", ".wav", ".zip"],
+  "_deliverableDirs": "路径里带这些目录名的一律算交付物 → 保留",
+  "deliverableDirs": ["deliverables", "交付", "成品", "output"],
+  "_scriptExt": "中间脚本 → 默认建议删",
+  "scriptExt": [".ps1", ".py", ".js", ".mjs", ".cjs", ".ts", ".sh", ".bat", ".cmd", ".psm1", ".vbs"],
+  "_tempExt": "临时后缀 → 默认删",
+  "tempExt": [".tmp", ".bak", ".log", ".cache", ".part", ".crdownload", ".old"],
+  "_tempDirs": "路径里带这些目录名的一律算临时",
+  "tempDirs": ["node_modules", ".git", ".cache", "__pycache__", "tmp", "temp", ".pnpm-store"],
+  "_textExt": "草稿 / 数据 → 默认建议删",
+  "textExt": [".txt", ".md", ".json", ".csv", ".yaml", ".yml", ".ini", ".html", ".xml", ".sql"],
+  "_sweep": "兜底扫描：工作目录里会话开始后被改过的文件（低置信度）；enabled=false 可关",
+  "sweep": { "enabled": true, "maxDepth": 4, "maxFiles": 200 }
+}
