@@ -1,9 +1,9 @@
 {
   "name": "dsh-session-wrapup",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
-  "description": "会话收尾：把这次对话产生的文件分好类、勾选删除，并把这个会话记进清理账本。DSH 插件，自带命令行。",
+  "description": "对话收尾：把这次对话在工作区里产生的文件分好类、勾选删除，并把这个会话记进清理账本；闲置 30 分钟后自动清理。DSH 插件，自带命令行。",
   "keywords": ["dsh", "dsh-plugin", "session", "cleanup", "wrapup"],
   "license": "MIT",
   "bin": {
