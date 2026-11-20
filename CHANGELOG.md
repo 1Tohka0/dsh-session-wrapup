@@ -2,6 +2,11 @@
 
 版本号按 [语义化版本](https://semver.org/lang/zh-CN/)：主版本改行为、次版本加功能、修订号只修 bug。
 
+## 1.0.3 — 2026-11-20
+
+- 加 `icon-180.png`：市场卡片用的 180×180 位图（列表只收 GitHub 托管的位图，SVG 会被拒）。
+- 发 GitHub Release 并挂 `dsh-session-wrapup.tgz`，装的时候可以直接下这个包，不必从源码构建。
+
 ## 1.0.2 — 2026-11-20
 
 - README 安装段补上 `git clone` 地址，第一次装的人不用猜仓库在哪。
