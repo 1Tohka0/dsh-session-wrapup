@@ -43,7 +43,7 @@ function sessionId(options) {
 }
 
 function groupOf(items) {
-  const groups = { 交付物: [], 其他: [], 中间产物: [], 中间脚本: [], 临时文件: [] }
+  const groups = { 交付物: [], 文件夹: [], 其他: [], 中间产物: [], 中间脚本: [], 临时文件: [] }
   for (const item of items) (groups[item.kind] ?? groups['其他']).push(item)
   return groups
 }
@@ -53,11 +53,16 @@ function printScan(payload) {
   console.log(`会话：${payload.title || '(无标题)'}  ${payload.session}`)
   console.log(`目录：${payload.cwd || payload.dir}`)
   console.log(
-    `共 ${payload.items.length} 个文件，${humanSize(payload.totalBytes)}；` +
+    `共 ${payload.fileCount ?? payload.items.length} 个文件` +
+      `${payload.folderCount ? `、${payload.folderCount} 个文件夹` : ''}，` +
+      `${humanSize(payload.totalBytes)}；` +
       `其中建议删除 ${humanSize(payload.deleteBytes)}`,
   )
+  if (payload.truncated) console.log('注意：文件太多，清单被截断了，请用面板或缩小工作区再扫。')
+  for (const line of payload.warnings ?? []) console.log(`注意：${line}`)
   const order = [
     ['交付物', '保留'],
+    ['文件夹', '整包删'],
     ['其他', '待定'],
     ['中间产物', '建议删'],
     ['中间脚本', '建议删'],
@@ -69,7 +74,11 @@ function printScan(payload) {
     const bytes = list.reduce((sum, item) => sum + item.size, 0)
     console.log(`\n【${kind}】（${hint}，${list.length} 个，${humanSize(bytes)}）`)
     for (const item of list) {
-      console.log(`  ${String(item.idx).padStart(2)}. ${humanSize(item.size).padStart(8)}  ${item.path}   ← ${item.why}`)
+      const tag = item.type === 'dir' ? `[文件夹 ${item.fileCount} 个文件] ` : ''
+      const unknown = item.unknownFiles > 0 ? `（其中 ${item.unknownFiles} 个不在清单里）` : ''
+      console.log(
+        `  ${String(item.idx).padStart(2)}. ${humanSize(item.size).padStart(8)}  ${tag}${item.path}${unknown}   ← ${item.why}`,
+      )
     }
   }
   if (!payload.items.length) console.log('\n(这次没有留下任何文件)')
@@ -108,10 +117,24 @@ function commandDelete(options) {
     console.error('要删哪些？--paths "a;b" 或 --all-deletable')
     process.exit(2)
   }
-  const result = trashPaths(picked.map((item) => item.path), { apply: options.dry !== true })
+  const kept = picked.filter((item) => item.keep)
+  for (const item of kept) console.error(`! ${item.path}：这是要保留的交付物，跳过`)
+  picked = picked.filter((item) => !item.keep)
+  if (!picked.length) {
+    console.error('选中的都是要保留的交付物，没有可删的')
+    process.exit(3)
+  }
+  const result = trashPaths(picked.map((item) => item.path), {
+    apply: options.dry !== true,
+    cwd: payload.cwd,
+    pruneCandidates: payload.pruneCandidates,
+  })
   const prefix = options.dry === true ? '[预览] 将删除' : '[已删除]'
-  console.log(`${prefix} ${result.moved.length} 个，${humanSize(result.bytes)} → ${result.batch}`)
-  for (const moved of result.moved) console.log(`  - ${moved.path}`)
+  const folders = result.moved.filter((moved) => moved.isDir).length
+  const files = result.moved.length - folders
+  console.log(`${prefix} ${files} 个文件、${folders} 个文件夹，${humanSize(result.bytes)} → ${result.batch}`)
+  for (const moved of result.moved) console.log(`  - ${moved.isDir ? '[文件夹] ' : ''}${moved.path}`)
+  for (const dir of result.pruned) console.log(`  - 空文件夹 ${dir}`)
   for (const failed of result.failed) console.log(`  ! ${failed.path}: ${failed.error}`)
 }
 

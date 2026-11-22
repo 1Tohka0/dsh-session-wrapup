@@ -12,6 +12,6 @@
   "tempDirs": ["node_modules", ".git", ".cache", "__pycache__", "tmp", "temp", ".pnpm-store"],
   "_textExt": "草稿 / 数据 → 默认建议删",
   "textExt": [".txt", ".md", ".json", ".csv", ".yaml", ".yml", ".ini", ".html", ".xml", ".sql"],
-  "_sweep": "兜底扫描：工作目录里会话开始后被改过的文件（低置信度）；enabled=false 可关",
-  "sweep": { "enabled": true, "maxDepth": 4, "maxFiles": 200 }
+  "_sweep": "兜底扫描：工作目录里会话开始后被改过/新建的文件与文件夹（低置信度）；enabled=false 可关",
+  "sweep": { "enabled": true, "maxDepth": 12, "maxFiles": 2000 }
 }

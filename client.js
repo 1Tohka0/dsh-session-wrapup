@@ -25,7 +25,7 @@ window.__ModuleLoader__.load({
     function mountOverlay(node) {
       return typeof createPortal === 'function' ? createPortal(node, document.body) : node
     }
-    const { useCallback, useEffect, useMemo, useState } = React
+    const { useCallback, useEffect, useMemo, useRef, useState } = React
 
     const TOKEN = {
       border: 'var(--dsw-alias-border-l2)',
@@ -40,13 +40,19 @@ window.__ModuleLoader__.load({
       radius: 'var(--dsw-radius-lg)',
     }
 
-    const GROUP_ORDER = ['交付物', '其他', '中间产物', '中间脚本', '临时文件']
+    const GROUP_ORDER = ['交付物', '文件夹', '其他', '中间产物', '中间脚本', '临时文件']
     const GROUP_HINT = {
       交付物: '这次要交的东西，默认保留',
+      文件夹: '会话期间新建的；整包删，含交付物时不能勾',
       其他: '说不准用途，自己看一眼',
       中间产物: '过程草稿，默认删除',
       中间脚本: '跑完就没用了，默认删除',
       临时文件: '纯垃圾，默认删除',
+    }
+
+    /** 路径统一成 / 小写，只用于父子关系比较。 */
+    function normPath(value) {
+      return String(value ?? '').replace(/\\/g, '/').toLowerCase()
     }
 
     function humanSize(bytes) {
@@ -150,17 +156,18 @@ window.__ModuleLoader__.load({
         position: 'sticky',
         top: 0,
         display: 'flex',
-        alignItems: 'baseline',
+        alignItems: 'center',
         gap: '8px',
         padding: '10px 0 6px',
         background: TOKEN.surface,
         zIndex: 1,
       },
+      groupCheck: { margin: 0, cursor: 'pointer', flex: '0 0 auto' },
       groupName: { fontSize: '12px', fontWeight: 600, color: TOKEN.label1 },
       groupHint: { fontSize: '11px', color: TOKEN.label4 },
       row: {
         display: 'grid',
-        gridTemplateColumns: '18px 76px 1fr',
+        gridTemplateColumns: '18px 78px 1fr',
         alignItems: 'center',
         gap: '10px',
         padding: '6px 8px',
@@ -170,6 +177,28 @@ window.__ModuleLoader__.load({
       size: { fontSize: '11px', color: TOKEN.label3, textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
       path: { fontSize: '12px', color: TOKEN.label2, wordBreak: 'break-all', lineHeight: '1.5' },
       why: { fontSize: '11px', color: TOKEN.label4, marginLeft: '6px' },
+      badge: {
+        display: 'inline-block',
+        marginRight: '6px',
+        padding: '0 6px',
+        borderRadius: '999px',
+        background: TOKEN.layer,
+        color: TOKEN.label3,
+        fontSize: '10px',
+        lineHeight: '16px',
+        whiteSpace: 'nowrap',
+      },
+      warnText: { color: '#b7791f', marginLeft: '6px' },
+      warning: {
+        margin: '10px 0 2px',
+        padding: '8px 10px',
+        border: `0.5px solid ${TOKEN.border}`,
+        borderRadius: '8px',
+        background: TOKEN.layer,
+        color: TOKEN.label3,
+        fontSize: '11px',
+        lineHeight: '1.7',
+      },
       footer: {
         display: 'flex',
         alignItems: 'center',
@@ -208,6 +237,26 @@ window.__ModuleLoader__.load({
     }
 
     /** The dialog: scan on open, tick, delete, or queue the session. */
+    /**
+     * 分组表头的三态勾选框：全选 / 部分选 / 全不选。
+     * 原生 checkbox 的 indeterminate 只能用 DOM 属性设置，所以这里用 ref 同步。
+     */
+    function GroupCheckbox({ state, disabled, onChange }) {
+      const ref = useRef(null)
+      useEffect(() => {
+        if (ref.current) ref.current.indeterminate = state === 'some'
+      }, [state])
+      return h('input', {
+        ref,
+        type: 'checkbox',
+        checked: state === 'all',
+        disabled,
+        onChange,
+        style: styles.groupCheck,
+        'aria-label': '这一组全选或全不选',
+      })
+    }
+
     function WrapupDialog({ sessionId, onClose }) {
       const [payload, setPayload] = useState(null)
       const [loading, setLoading] = useState(true)
@@ -229,8 +278,8 @@ window.__ModuleLoader__.load({
           setPayload({ ...data, items: list })
           setLiveIdle(typeof data.idleMs === 'number' ? data.idleMs : null)
           setQueued(Boolean(data.queued))
-          // 默认勾选：扫描已经标成「建议删」的那些
-          setPicked(new Set(list.filter((item) => !item.keep).map((item) => item.idx)))
+          // 默认勾选：扫描已经标成「建议删」的那些；含清单外文件的文件夹默认不勾
+          setPicked(new Set(list.filter((item) => !item.keep && item.defaultDelete !== false).map((item) => item.idx)))
         } catch (caught) {
           setError(String(caught?.message ?? caught))
         } finally {
@@ -251,6 +300,27 @@ window.__ModuleLoader__.load({
       }, [onClose])
 
       const items = payload?.items ?? []
+
+      /** 一个条目的所有下级条目（文件夹才有）。 */
+      const descendantsOf = useCallback(
+        (item) => {
+          if (item?.type !== 'dir') return []
+          const prefix = `${normPath(item.path)}/`
+          return items.filter((other) => other.idx !== item.idx && normPath(other.path).startsWith(prefix))
+        },
+        [items],
+      )
+
+      /** 一个条目上层的所有文件夹条目。 */
+      const ancestorsOf = useCallback(
+        (item) =>
+          items.filter(
+            (other) =>
+              other.type === 'dir' && normPath(item.path).startsWith(`${normPath(other.path)}/`),
+          ),
+        [items],
+      )
+
       const groups = useMemo(() => {
         const map = new Map()
         for (const item of items) {
@@ -261,21 +331,76 @@ window.__ModuleLoader__.load({
         return GROUP_ORDER.filter((kind) => map.has(kind)).map((kind) => [kind, map.get(kind)])
       }, [items])
 
-      const pickedBytes = useMemo(
-        () => items.filter((item) => picked.has(item.idx)).reduce((sum, item) => sum + (item.size || 0), 0),
+      // 勾选按「根条目」算体积：文件夹被勾中时，里面的文件不重复加一遍。
+      const selectedItems = useMemo(
+        () => items.filter((item) => picked.has(item.idx)),
         [items, picked],
       )
+      const selectedRoots = useMemo(
+        () =>
+          selectedItems.filter(
+            (item) =>
+              !selectedItems.some(
+                (other) =>
+                  other.type === 'dir' &&
+                  other.idx !== item.idx &&
+                  normPath(item.path).startsWith(`${normPath(other.path)}/`),
+              ),
+          ),
+        [selectedItems],
+      )
+      const pickedBytes = selectedRoots.reduce((sum, item) => sum + (item.size || 0), 0)
 
-      const toggle = (idx) => {
+      /** 勾/取消一个条目；文件夹会带上全部下级，并回算上层文件夹的三态。 */
+      const markSubtree = (target, item, on) => {
+        if (on && item.keep) return
+        if (on) target.add(item.idx)
+        else target.delete(item.idx)
+        if (item.type === 'dir') {
+          for (const child of descendantsOf(item)) markSubtree(target, child, on)
+        }
+      }
+
+      const toggle = (item) => {
+        if (item.keep) return
         setPicked((previous) => {
           const next = new Set(previous)
-          if (next.has(idx)) next.delete(idx)
-          else next.add(idx)
+          const want = !previous.has(item.idx)
+          markSubtree(next, item, want)
+          for (const ancestor of ancestorsOf(item)) {
+            if (ancestor.keep) continue
+            const family = [ancestor, ...descendantsOf(ancestor)]
+            const all = family.every((entry) => next.has(entry.idx))
+            if (all) next.add(ancestor.idx)
+            else next.delete(ancestor.idx)
+          }
           return next
         })
       }
 
-      const selectDeletable = () => setPicked(new Set(items.filter((item) => !item.keep).map((item) => item.idx)))
+      const groupState = (list) => {
+        const selectable = list.filter((item) => !item.keep)
+        if (!selectable.length) return 'none'
+        const count = selectable.filter((item) => picked.has(item.idx)).length
+        if (count === 0) return 'none'
+        return count === selectable.length ? 'all' : 'some'
+      }
+
+      const toggleGroup = (list) => {
+        const want = groupState(list) !== 'all'
+        setPicked((previous) => {
+          const next = new Set(previous)
+          for (const item of list) {
+            if (item.keep) continue
+            markSubtree(next, item, want)
+          }
+          return next
+        })
+      }
+
+      const selectDeletable = () =>
+        setPicked(new Set(items.filter((item) => !item.keep && item.defaultDelete !== false).map((item) => item.idx)))
+      const selectAll = () => setPicked(new Set(items.filter((item) => !item.keep).map((item) => item.idx)))
       const selectNone = () => setPicked(new Set())
 
       const runDelete = useCallback(
@@ -284,19 +409,37 @@ window.__ModuleLoader__.load({
           setError('')
           setMessage('')
           // 只传路径：Host 会立刻重扫一遍再按路径匹配，编号错位也删不到别的文件。
-          const paths = items.filter((item) => picked.has(item.idx)).map((item) => item.path)
-          const keptPaths = items.filter((item) => !picked.has(item.idx)).map((item) => item.path)
+          // 文件夹只传最外层那一个，Host 会整包搬走，不会把里面的文件重复删一遍。
+          const paths = selectedRoots.map((item) => item.path)
+          const covered = (filePath) =>
+            selectedRoots.some((root) => {
+              const base = normPath(root.path)
+              const target = normPath(filePath)
+              return target === base || target.startsWith(`${base}/`)
+            })
+          const keptPaths = items
+            .filter((item) => item.type === 'file' && !covered(item.path))
+            .map((item) => item.path)
           try {
             let text = ''
             if (paths.length > 0) {
               const result = await postJson('/delete', { session: sessionId, paths })
-              text = `已删除 ${result.deleted} 个文件，${humanSize(result.bytes)}\n${result.batch}`
+              const fileCount = result.deletedFiles ?? result.deleted
+              text =
+                result.deletedFolders > 0
+                  ? `已收走 ${fileCount} 个文件、${result.deletedFolders} 个文件夹，${humanSize(result.bytes)}`
+                  : `已删除 ${fileCount} 个文件，${humanSize(result.bytes)}`
+              text += `\n${result.batch}`
+              if (result.pruned?.length) text += `\n顺手清掉 ${result.pruned.length} 个空文件夹`
               if (result.missing?.length) text += `\n跳过 ${result.missing.length} 个已经不在磁盘上的`
+              if (result.refused?.length) {
+                text += '\n' + result.refused.map((item) => `! ${item.path}：${item.reason}`).join('\n')
+              }
               if (result.failed?.length) {
                 text += '\n' + result.failed.map((item) => `! ${item.path}: ${item.error}`).join('\n')
               }
             } else {
-              text = '没有勾选任何文件，跳过删除'
+              text = '没有勾选任何东西，跳过删除'
             }
             if (alsoQueue) {
               const marked = await postJson('/mark', {
@@ -317,7 +460,7 @@ window.__ModuleLoader__.load({
             setBusy(false)
           }
         },
-        [items, load, payload, picked, sessionId],
+        [items, load, payload, selectedRoots, sessionId],
       )
 
       // 每 2.5 秒问一次服务器「现在多久没写了」。
@@ -346,7 +489,10 @@ window.__ModuleLoader__.load({
       const writing = liveIdle !== null && liveIdle < 10000
 
       const headerNote = payload
-        ? `共 ${items.length} 个文件 · 合计 ${humanSize(payload.totalBytes)} · 勾选 ${picked.size} 个（${humanSize(pickedBytes)}）`
+        ? `共 ${payload.fileCount ?? items.length} 个文件` +
+          `${payload.folderCount ? ` · ${payload.folderCount} 个文件夹` : ''}` +
+          ` · 合计 ${humanSize(payload.totalBytes)}` +
+          ` · 勾选 ${selectedRoots.length} 项（${humanSize(pickedBytes)}）`
         : '正在统计这次对话产生的文件…'
 
       return mountOverlay(
@@ -380,6 +526,13 @@ window.__ModuleLoader__.load({
               { style: styles.body },
               loading ? h('div', { style: styles.empty }, '扫描中…') : null,
               error ? h('div', { style: styles.error }, error) : null,
+              payload?.warnings?.length
+                ? h(
+                    'div',
+                    { style: styles.warning },
+                    payload.warnings.map((line) => h('div', { key: line }, `· ${line}`)),
+                  )
+                : null,
               !loading && !error && items.length === 0
                 ? h('div', { style: styles.empty }, '这次对话没有在工作区留下任何文件。')
                 : null,
@@ -390,6 +543,11 @@ window.__ModuleLoader__.load({
                   h(
                     'div',
                     { style: styles.groupHead },
+                    h(GroupCheckbox, {
+                      state: groupState(list),
+                      disabled: list.every((item) => item.keep),
+                      onChange: () => toggleGroup(list),
+                    }),
                     h('span', { style: styles.groupName }, kind),
                     h('span', { style: styles.groupHint }, `${GROUP_HINT[kind] ?? ''} · ${list.length} 个`),
                   ),
@@ -398,9 +556,10 @@ window.__ModuleLoader__.load({
                       'label',
                       {
                         key: item.idx,
-                        style: { ...styles.row, cursor: 'pointer' },
+                        style: { ...styles.row, cursor: item.keep ? 'default' : 'pointer' },
+                        title: item.keep ? '这一项默认保留，不能勾选' : item.why,
                         onMouseEnter: (event) => {
-                          event.currentTarget.style.background = TOKEN.hover
+                          if (!item.keep) event.currentTarget.style.background = TOKEN.hover
                         },
                         onMouseLeave: (event) => {
                           event.currentTarget.style.background = 'transparent'
@@ -409,13 +568,20 @@ window.__ModuleLoader__.load({
                       h('input', {
                         type: 'checkbox',
                         checked: picked.has(item.idx),
-                        onChange: () => toggle(item.idx),
+                        disabled: item.keep,
+                        onChange: () => toggle(item),
                       }),
                       h('span', { style: styles.size }, humanSize(item.size)),
                       h(
                         'span',
                         { style: styles.path, title: item.path },
+                        item.type === 'dir'
+                          ? h('span', { style: styles.badge }, `📁 ${item.fileCount} 个文件`)
+                          : null,
                         item.path,
+                        item.unknownFiles > 0
+                          ? h('span', { style: styles.warnText }, `其中 ${item.unknownFiles} 个不在清单里`)
+                          : null,
                         item.why ? h('span', { style: styles.why }, `← ${item.why}`) : null,
                       ),
                     ),
@@ -455,7 +621,8 @@ window.__ModuleLoader__.load({
                     : '删除是两阶段的：文件先挪进 home\\_trash，3 天后才真正消失。',
               ),
               h('button', { style: styles.button, onClick: selectDeletable, disabled: busy }, '恢复默认勾选'),
-              h('button', { style: styles.button, onClick: selectNone, disabled: busy }, '全部不勾'),
+              h('button', { style: styles.button, onClick: selectAll, disabled: busy }, '全选'),
+              h('button', { style: styles.button, onClick: selectNone, disabled: busy }, '全部取消'),
               queued
                 ? h(
                     'button',
@@ -481,7 +648,7 @@ window.__ModuleLoader__.load({
               h('button', { style: styles.button, onClick: onClose, disabled: busy }, '关掉'),
               h(
                 'button',
-                { style: styles.button, onClick: () => void runDelete(false), disabled: busy || picked.size === 0 },
+                { style: styles.button, onClick: () => void runDelete(false), disabled: busy || selectedRoots.length === 0 },
                 busy ? '处理中…' : '只删勾选的',
               ),
               h(
