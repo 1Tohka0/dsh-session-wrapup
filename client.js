@@ -529,10 +529,14 @@ window.__ModuleLoader__.load({
       // 10 秒内写过 = 这一轮还没说完。null 表示量不到，按「没在写」处理。
       const writing = liveIdle !== null && liveIdle < 10000
 
+      const selectableCount = items.filter((item) => !item.keep).length
+      const defaultCount = items.filter((item) => !item.keep && item.defaultDelete !== false).length
+      const protectedCount = items.filter((item) => item.keep).length
       const headerNote = payload
         ? `共 ${payload.fileCount ?? items.length} 个文件` +
           `${payload.folderCount ? ` · ${payload.folderCount} 个文件夹` : ''}` +
           ` · 合计 ${humanSize(payload.totalBytes)}` +
+          ` · 可删 ${selectableCount} 项` +
           ` · 勾选 ${selectedRoots.length} 项（${humanSize(pickedBytes)}）`
         : '正在统计这次对话产生的文件…'
 
@@ -657,9 +661,11 @@ window.__ModuleLoader__.load({
                 { style: styles.note },
                 queued
                   ? '这个会话已记进清理账本：闲置够久后，下次启动 DSH 会把它收进回收站。'
-                  : payload?.skippedHome
-                    ? `另有 ${payload.skippedHome} 个 DSH 自身数据文件不在清单里。`
-                    : '删除是两阶段的：文件先挪进 home\\_trash，3 天后才真正消失。',
+                  : protectedCount
+                    ? `${protectedCount} 个交付物默认保留，不参与「全选」；要搬走请点「收进成品」。`
+                    : payload?.skippedHome
+                      ? `另有 ${payload.skippedHome} 个 DSH 自身数据文件不在清单里。`
+                      : '删除是两阶段的：文件先挪进 home\\_trash，3 天后才真正消失。',
               ),
               h(
                 'button',
@@ -673,9 +679,35 @@ window.__ModuleLoader__.load({
                 },
                 busy ? '处理中…' : `收进成品 (${deliverables.length})`,
               ),
-              h('button', { style: styles.button, onClick: selectDeletable, disabled: busy }, '恢复默认勾选'),
-              h('button', { style: styles.button, onClick: selectAll, disabled: busy }, '全选'),
-              h('button', { style: styles.button, onClick: selectNone, disabled: busy }, '全部取消'),
+              h(
+                'button',
+                {
+                  style: styles.button,
+                  onClick: selectDeletable,
+                  disabled: busy || defaultCount === 0,
+                  title: `恢复成建议删除的 ${defaultCount} 项`,
+                },
+                `恢复默认 (${defaultCount})`,
+              ),
+              h(
+                'button',
+                {
+                  style: styles.button,
+                  onClick: selectAll,
+                  disabled: busy || selectableCount === 0,
+                  title: '选中所有可删除项；交付物默认保留，不参与全选',
+                },
+                `全选可删 (${selectableCount})`,
+              ),
+              h(
+                'button',
+                {
+                  style: styles.button,
+                  onClick: selectNone,
+                  disabled: busy || picked.size === 0,
+                },
+                '全部取消',
+              ),
               queued
                 ? h(
                     'button',

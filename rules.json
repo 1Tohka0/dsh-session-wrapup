@@ -17,5 +17,6 @@
   "_deliverPerSession": "true = 每次对话在 deliverDir 下再建一个「会话标题」子文件夹；false = 全摊在 deliverDir 里",
   "deliverPerSession": true,
   "_sweep": "兜底扫描：工作目录里会话开始后被改过/新建的文件与文件夹（低置信度）；enabled=false 可关",
-  "sweep": { "enabled": true, "maxDepth": 12, "maxFiles": 2000 }
+  "_excludeOtherSessions": "同一工作区里别的会话写过的文件不列进本会话清单；false 可关",
+  "sweep": { "enabled": true, "maxDepth": 12, "maxFiles": 2000, "excludeOtherSessions": true }
 }

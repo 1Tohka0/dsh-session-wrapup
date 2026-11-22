@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { zstdCompressSync } from 'node:zlib'
 import { after, before, test } from 'node:test'
 
 const root = mkdtempSync(join(tmpdir(), 'wrapup-test-'))
@@ -195,4 +196,47 @@ test('兜底扫描跳过浏览器配置目录', () => {
   const paths = [...result.files.values()].map((file) => file.path)
   assert.ok(paths.some((path) => path.endsWith('normal.txt')))
   assert.ok(!paths.some((path) => path.includes('edgeprofile')), 'profile 里的缓存文件不该进清单')
+})
+
+test('同一工作区里别的会话写过的文件不会算进来', async () => {
+  const home = process.env.DSH_HOME
+  const shared = join(root, 'shared-workspace')
+  mkdirSync(shared, { recursive: true })
+  const start = Date.now() - 60_000
+
+  const selfId = 'session-aaaaaaaa-1111-4111-8111-111111111111'
+  const otherId = 'session-bbbbbbbb-2222-4222-8222-222222222222'
+  const selfFile = join(shared, 'mine.txt')
+  const otherDir = join(shared, 'other')
+  const otherFile = join(otherDir, 'a.txt')
+  writeFileSync(selfFile, 'mine')
+  mkdirSync(otherDir, { recursive: true })
+  writeFileSync(otherFile, 'not mine')
+
+  const put = (id, records) => {
+    const dir = join(home, 'sessions', '--shared--', id)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, 'session.v4.jsonl.zstd'),
+      zstdCompressSync(Buffer.from(records.map((record) => JSON.stringify(record)).join('\n'))),
+    )
+  }
+  put(selfId, [
+    { type: 'session', cwd: shared, time: start },
+    { type: 'session/title', data: { title: '自己' }, time: start },
+    { type: 'tool/call', data: { name: 'write', arguments: { file_path: selfFile } }, time: start + 1 },
+  ])
+  put(otherId, [
+    { type: 'session', cwd: shared, time: start - 1_000 },
+    { type: 'session/title', data: { title: '别人' }, time: start - 1_000 },
+    { type: 'tool/call', data: { name: 'write', arguments: { file_path: otherFile } }, time: start + 1_000 },
+  ])
+
+  const { scanSession } = await import('../lib/scan.mjs')
+  const result = scanSession(selfId)
+  const paths = result.items.map((item) => item.path)
+  assert.ok(paths.includes(selfFile), '自己写的文件应该留着')
+  assert.ok(!paths.some((path) => path === otherFile || path.startsWith(otherDir)), '别的会话的文件不该出现')
+  assert.ok(!paths.some((path) => path.endsWith('a.txt')))
+  assert.equal(result.excludedOtherSessions, 1)
 })

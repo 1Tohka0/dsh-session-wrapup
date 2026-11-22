@@ -75,6 +75,7 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 - 新建文件夹里的内容整体算「这次产生的」（force），不再被单个文件的旧时间骗过去；
 - 默认深度 12、最多 2000 个文件（`rules.json` 的 `sweep` 可调）；
 - 跳过 `node_modules`、`.git`、`__pycache__`、`dist` 这类依赖/构建目录和点开头的隐藏目录，并在清单里报告跳过数量；
+- **排除兄弟会话**：`otherSessionClaims(cwd, selfId)` 读同一个 `cwd` 下其他会话的日志，把它们 `collectFiles` 得到的精确路径收进 `claimed`，并把这些路径在工作区下的一级目录收进 `roots`；兜底扫描命中这两类就跳过，计入 `skippedOtherSessions`。本会话工具调用明确写过的路径优先，不受影响。可用 `rules.sweep.excludeOtherSessions: false` 关闭；
 - 到上限时返回 `truncated: true`，面板顶部显示「可能还有没列出来的」，**不会假装扫全了**。
 
 ### 4. 分类
