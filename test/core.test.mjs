@@ -232,11 +232,22 @@ test('同一工作区里别的会话写过的文件不会算进来', async () =>
     { type: 'tool/call', data: { name: 'write', arguments: { file_path: otherFile } }, time: start + 1_000 },
   ])
 
+  // 成品目录是共用的：自己标题下的可以列，别人标题下的整棵忽略
+  const ownDeliver = join(shared, '成品', '自己', 'own.png')
+  const foreignDeliver = join(shared, '成品', '别人', 'other.png')
+  mkdirSync(join(shared, '成品', '自己'), { recursive: true })
+  mkdirSync(join(shared, '成品', '别人'), { recursive: true })
+  writeFileSync(ownDeliver, 'png')
+  writeFileSync(foreignDeliver, 'png')
+
   const { scanSession } = await import('../lib/scan.mjs')
   const result = scanSession(selfId)
   const paths = result.items.map((item) => item.path)
   assert.ok(paths.includes(selfFile), '自己写的文件应该留着')
   assert.ok(!paths.some((path) => path === otherFile || path.startsWith(otherDir)), '别的会话的文件不该出现')
   assert.ok(!paths.some((path) => path.endsWith('a.txt')))
+  assert.ok(paths.includes(ownDeliver), '自己成品子文件夹里的交付物应该列出来')
+  assert.ok(!paths.includes(foreignDeliver), '别人成品子文件夹里的交付物不该出现')
+  assert.ok(result.skippedForeignDeliver >= 1)
   assert.equal(result.excludedOtherSessions, 1)
 })

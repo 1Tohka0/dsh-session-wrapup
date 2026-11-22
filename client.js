@@ -205,6 +205,17 @@ window.__ModuleLoader__.load({
         fontSize: '11px',
         lineHeight: '1.7',
       },
+      unlockRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        margin: '10px 0 2px',
+        fontSize: '11px',
+        color: TOKEN.label3,
+        cursor: 'pointer',
+        userSelect: 'none',
+      },
+      unlockOn: { color: '#b7791f', fontWeight: 500 },
       footer: {
         display: 'flex',
         alignItems: 'center',
@@ -274,6 +285,10 @@ window.__ModuleLoader__.load({
       const [liveIdle, setLiveIdle] = useState(null)
       /** 这个会话是否已经记进清理账本。 */
       const [queued, setQueued] = useState(false)
+      /** 交付物默认锁住；打开后交付物也能勾选、删除。 */
+      const [unlock, setUnlock] = useState(false)
+      /** 选中了交付物时，先要一次二次确认。 */
+      const [confirmKeep, setConfirmKeep] = useState(false)
 
       const load = useCallback(async () => {
         setLoading(true)
@@ -356,10 +371,16 @@ window.__ModuleLoader__.load({
         [selectedItems],
       )
       const pickedBytes = selectedRoots.reduce((sum, item) => sum + (item.size || 0), 0)
+      // 勾选变了就撤销「二次确认」，避免确认状态悬在半空。
+      useEffect(() => {
+        setConfirmKeep(false)
+      }, [picked, unlock])
       const deliverables = useMemo(
         () => items.filter((item) => item.type === 'file' && item.keep),
         [items],
       )
+      /** 交付物默认锁住；解锁后才允许勾选、删除。 */
+      const locked = useCallback((item) => Boolean(item?.keep) && !unlock, [unlock])
       // Host 在 rules.deliverPerSession 打开时会再按标题套一层子文件夹
       const deliverTarget = payload?.deliverFolder
         ? `${payload.deliverDir || '成品'}/${payload.deliverFolder}`
@@ -367,7 +388,7 @@ window.__ModuleLoader__.load({
 
       /** 勾/取消一个条目；文件夹会带上全部下级，并回算上层文件夹的三态。 */
       const markSubtree = (target, item, on) => {
-        if (on && item.keep) return
+        if (on && locked(item)) return
         if (on) target.add(item.idx)
         else target.delete(item.idx)
         if (item.type === 'dir') {
@@ -376,13 +397,13 @@ window.__ModuleLoader__.load({
       }
 
       const toggle = (item) => {
-        if (item.keep) return
+        if (locked(item)) return
         setPicked((previous) => {
           const next = new Set(previous)
           const want = !previous.has(item.idx)
           markSubtree(next, item, want)
           for (const ancestor of ancestorsOf(item)) {
-            if (ancestor.keep) continue
+            if (locked(ancestor)) continue
             const family = [ancestor, ...descendantsOf(ancestor)]
             const all = family.every((entry) => next.has(entry.idx))
             if (all) next.add(ancestor.idx)
@@ -393,7 +414,7 @@ window.__ModuleLoader__.load({
       }
 
       const groupState = (list) => {
-        const selectable = list.filter((item) => !item.keep)
+        const selectable = list.filter((item) => !locked(item))
         if (!selectable.length) return 'none'
         const count = selectable.filter((item) => picked.has(item.idx)).length
         if (count === 0) return 'none'
@@ -405,7 +426,7 @@ window.__ModuleLoader__.load({
         setPicked((previous) => {
           const next = new Set(previous)
           for (const item of list) {
-            if (item.keep) continue
+            if (locked(item)) continue
             markSubtree(next, item, want)
           }
           return next
@@ -414,13 +435,24 @@ window.__ModuleLoader__.load({
 
       const selectDeletable = () =>
         setPicked(new Set(items.filter((item) => !item.keep && item.defaultDelete !== false).map((item) => item.idx)))
-      const selectAll = () => setPicked(new Set(items.filter((item) => !item.keep).map((item) => item.idx)))
+      const selectAll = () =>
+        setPicked(new Set(items.filter((item) => unlock || !item.keep).map((item) => item.idx)))
       const selectNone = () => setPicked(new Set())
 
       const runDelete = useCallback(
         async (alsoQueue) => {
-          setBusy(true)
           setError('')
+          // 勾了交付物：先要一次二次确认，确认后才真的发删除请求。
+          const hasKeep = selectedRoots.some((item) => item.keep)
+          if (hasKeep && !confirmKeep) {
+            setConfirmKeep(true)
+            setMessage(
+              `选中的里有 ${selectedRoots.filter((item) => item.keep).length} 个交付物。` +
+                '再点一次删除按钮确认，它们会和普通文件一样进回收站。',
+            )
+            return
+          }
+          setBusy(true)
           setMessage('')
           // 只传路径：Host 会立刻重扫一遍再按路径匹配，编号错位也删不到别的文件。
           // 文件夹只传最外层那一个，Host 会整包搬走，不会把里面的文件重复删一遍。
@@ -437,7 +469,11 @@ window.__ModuleLoader__.load({
           try {
             let text = ''
             if (paths.length > 0) {
-              const result = await postJson('/delete', { session: sessionId, paths })
+              const result = await postJson('/delete', {
+                session: sessionId,
+                paths,
+                allowDeliverables: hasKeep,
+              })
               const fileCount = result.deletedFiles ?? result.deleted
               text =
                 result.deletedFolders > 0
@@ -474,7 +510,7 @@ window.__ModuleLoader__.load({
             setBusy(false)
           }
         },
-        [items, load, payload, selectedRoots, sessionId],
+        [confirmKeep, items, load, payload, selectedRoots, sessionId],
       )
 
 
@@ -529,9 +565,9 @@ window.__ModuleLoader__.load({
       // 10 秒内写过 = 这一轮还没说完。null 表示量不到，按「没在写」处理。
       const writing = liveIdle !== null && liveIdle < 10000
 
-      const selectableCount = items.filter((item) => !item.keep).length
+      const selectableCount = items.filter((item) => !locked(item)).length
       const defaultCount = items.filter((item) => !item.keep && item.defaultDelete !== false).length
-      const protectedCount = items.filter((item) => item.keep).length
+      const protectedCount = items.filter((item) => locked(item)).length
       const headerNote = payload
         ? `共 ${payload.fileCount ?? items.length} 个文件` +
           `${payload.folderCount ? ` · ${payload.folderCount} 个文件夹` : ''}` +
@@ -578,6 +614,24 @@ window.__ModuleLoader__.load({
                     payload.warnings.map((line) => h('div', { key: line }, `· ${line}`)),
                   )
                 : null,
+              !loading && !error && items.length > 0
+                ? h(
+                    'label',
+                    { style: styles.unlockRow },
+                    h('input', {
+                      type: 'checkbox',
+                      checked: unlock,
+                      onChange: (event) => {
+                        setUnlock(event.target.checked)
+                        setPicked(new Set())
+                        setConfirmKeep(false)
+                      },
+                    }),
+                    unlock
+                      ? h('span', { style: styles.unlockOn }, '交付物已解锁：可以勾选删除，删了同样进回收站')
+                      : '允许勾选并删除交付物（默认锁住）',
+                  )
+                : null,
               !loading && !error && items.length === 0
                 ? h('div', { style: styles.empty }, '这次对话没有在工作区留下任何文件。')
                 : null,
@@ -590,7 +644,7 @@ window.__ModuleLoader__.load({
                     { style: styles.groupHead },
                     h(GroupCheckbox, {
                       state: groupState(list),
-                      disabled: list.every((item) => item.keep),
+                      disabled: list.every((item) => locked(item)),
                       onChange: () => toggleGroup(list),
                     }),
                     h('span', { style: styles.groupName }, kind),
@@ -601,10 +655,10 @@ window.__ModuleLoader__.load({
                       'label',
                       {
                         key: item.idx,
-                        style: { ...styles.row, cursor: item.keep ? 'default' : 'pointer' },
-                        title: item.keep ? '这一项默认保留，不能勾选' : item.why,
+                        style: { ...styles.row, cursor: locked(item) ? 'default' : 'pointer' },
+                        title: locked(item) ? '交付物默认锁住；勾上面的「允许勾选并删除交付物」才能选' : item.why,
                         onMouseEnter: (event) => {
-                          if (!item.keep) event.currentTarget.style.background = TOKEN.hover
+                          if (!locked(item)) event.currentTarget.style.background = TOKEN.hover
                         },
                         onMouseLeave: (event) => {
                           event.currentTarget.style.background = 'transparent'
@@ -613,7 +667,7 @@ window.__ModuleLoader__.load({
                       h('input', {
                         type: 'checkbox',
                         checked: picked.has(item.idx),
-                        disabled: item.keep,
+                        disabled: locked(item),
                         onChange: () => toggle(item),
                       }),
                       h('span', { style: styles.size }, humanSize(item.size)),
@@ -661,11 +715,13 @@ window.__ModuleLoader__.load({
                 { style: styles.note },
                 queued
                   ? '这个会话已记进清理账本：闲置够久后，下次启动 DSH 会把它收进回收站。'
-                  : protectedCount
-                    ? `${protectedCount} 个交付物默认保留，不参与「全选」；要搬走请点「收进成品」。`
-                    : payload?.skippedHome
-                      ? `另有 ${payload.skippedHome} 个 DSH 自身数据文件不在清单里。`
-                      : '删除是两阶段的：文件先挪进 home\\_trash，3 天后才真正消失。',
+                  : unlock
+                    ? '交付物已解锁：勾中后会像普通文件一样进回收站，3 天内可以恢复。'
+                    : protectedCount
+                      ? `${protectedCount} 个交付物默认保留；勾「允许勾选并删除交付物」才能选。`
+                      : payload?.skippedHome
+                        ? `另有 ${payload.skippedHome} 个 DSH 自身数据文件不在清单里。`
+                        : '删除是两阶段的：文件先挪进 home\\_trash，3 天后才真正消失。',
               ),
               h(
                 'button',
@@ -695,9 +751,9 @@ window.__ModuleLoader__.load({
                   style: styles.button,
                   onClick: selectAll,
                   disabled: busy || selectableCount === 0,
-                  title: '选中所有可删除项；交付物默认保留，不参与全选',
+                  title: unlock ? '选中全部条目，包括交付物' : '选中所有可删除项；交付物默认保留，不参与全选',
                 },
-                `全选可删 (${selectableCount})`,
+                unlock ? `全选全部 (${selectableCount})` : `全选可删 (${selectableCount})`,
               ),
               h(
                 'button',
@@ -734,7 +790,7 @@ window.__ModuleLoader__.load({
               h(
                 'button',
                 { style: styles.button, onClick: () => void runDelete(false), disabled: busy || selectedRoots.length === 0 },
-                busy ? '处理中…' : '只删勾选的',
+                busy ? '处理中…' : confirmKeep ? '确认删除（含交付物）' : '只删勾选的',
               ),
               h(
                 'button',
@@ -744,7 +800,13 @@ window.__ModuleLoader__.load({
                   disabled: busy || writing,
                   title: writing ? '这一轮还在写，等它说完再收尾' : '删掉勾选的文件，并把这个会话记进清理队列',
                 },
-                busy ? '处理中…' : writing ? '等这一轮说完…' : '删掉并收尾会话',
+                busy
+                  ? '处理中…'
+                  : writing
+                    ? '等这一轮说完…'
+                    : confirmKeep
+                      ? '确认删除并收尾'
+                      : '删掉并收尾会话',
               ),
             ),
           ),

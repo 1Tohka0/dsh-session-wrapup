@@ -5,8 +5,9 @@
  * 面板按钮用的是同一批 lib/*.mjs，所以命令行和界面永远一个行为。
  *
  *   node bin/wrapup.mjs scan   [--session <id>] [--no-sweep] [--json]
- *   node bin/wrapup.mjs delete --session <id> --paths "a;b;c" [--dry]
+ *   node bin/wrapup.mjs delete --session <id> --paths "a;b;c" [--dry] [--allow-deliverables]
  *   node bin/wrapup.mjs delete --session <id> --all-deletable [--dry]
+ *   node bin/wrapup.mjs delete --session <id> --all [--allow-deliverables] [--dry]
  *   node bin/wrapup.mjs deliver --session <id> [--to 成品] [--flat] [--dry]
  *   node bin/wrapup.mjs mark   [--session <id>] [--keep "a;b"] [--force]
  *   node bin/wrapup.mjs unmark [--session <id>]
@@ -101,8 +102,11 @@ function commandDelete(options) {
     process.exit(2)
   }
   const payload = scanSession(id)
+  const allowDeliverables = options['allow-deliverables'] === true
   let picked
-  if (options['all-deletable'] === true) {
+  if (options.all === true) {
+    picked = payload.items
+  } else if (options['all-deletable'] === true) {
     picked = payload.items.filter((item) => !item.keep)
   } else if (typeof options.paths === 'string') {
     const wanted = new Set(
@@ -119,12 +123,14 @@ function commandDelete(options) {
     console.error('要删哪些？--paths "a;b" 或 --all-deletable')
     process.exit(2)
   }
-  const kept = picked.filter((item) => item.keep)
-  for (const item of kept) console.error(`! ${item.path}：这是要保留的交付物，跳过`)
-  picked = picked.filter((item) => !item.keep)
-  if (!picked.length) {
-    console.error('选中的都是要保留的交付物，没有可删的')
-    process.exit(3)
+  if (!allowDeliverables) {
+    const kept = picked.filter((item) => item.keep)
+    for (const item of kept) console.error(`! ${item.path}：这是要保留的交付物，跳过（要删加 --allow-deliverables）`)
+    picked = picked.filter((item) => !item.keep)
+    if (!picked.length) {
+      console.error('选中的都是要保留的交付物，没有可删的；确实要删请加 --allow-deliverables')
+      process.exit(3)
+    }
   }
   const result = trashPaths(picked.map((item) => item.path), {
     apply: options.dry !== true,

@@ -76,6 +76,7 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 - 默认深度 12、最多 2000 个文件（`rules.json` 的 `sweep` 可调）；
 - 跳过 `node_modules`、`.git`、`__pycache__`、`dist` 这类依赖/构建目录和点开头的隐藏目录，并在清单里报告跳过数量；
 - **排除兄弟会话**：`otherSessionClaims(cwd, selfId)` 读同一个 `cwd` 下其他会话的日志，把它们 `collectFiles` 得到的精确路径收进 `claimed`，并把这些路径在工作区下的一级目录收进 `roots`；兜底扫描命中这两类就跳过，计入 `skippedOtherSessions`。本会话工具调用明确写过的路径优先，不受影响。可用 `rules.sweep.excludeOtherSessions: false` 关闭；
+- **成品目录只认自己的**：`成品/` 是所有对话共用的，兜底扫描只保留当前会话的 `成品/<本会话标题>/`（`deliverPerSession=false` 时整块成品都不列），其他子文件夹按 `skippedForeignDeliver` 忽略并给警告；
 - 到上限时返回 `truncated: true`，面板顶部显示「可能还有没列出来的」，**不会假装扫全了**。
 
 ### 4. 分类
@@ -91,7 +92,7 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 
 文件夹单独走 `classifyDir`：
 
-- 里面有交付物 → `kind='文件夹'`、`keep=true`（面板里勾不动，整包删除被拒）；
+- 里面有交付物 → `kind='文件夹'`、`keep=true`（默认锁住；解锁并二次确认后可整包删除）；
 - 里面有清单外的文件 → `defaultDelete=false`（默认不勾，让你先看一眼）；
 - 空目录 → `defaultDelete=true`（默认勾，删完顺手收掉）。
 
@@ -105,8 +106,8 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 
 | 分组 | 判定 | 默认 |
 | --- | --- | --- |
-| 交付物 | 展示过 / 在 `deliverables` 类目录 / 成品后缀 | 保留 |
-| 文件夹 | 会话期间新建的目录 | 勾选；含交付物时保留 |
+| 交付物 | 展示过 / 在 `deliverables` 类目录 / 成品后缀 | 默认锁住；解锁后可删 |
+| 文件夹 | 会话期间新建的目录 | 勾选；含交付物时默认锁住 |
 | 其他 | 认不出 | 勾选 |
 | 中间产物 | `.md` `.txt` `.json` 等 | 勾选 |
 | 中间脚本 | `.py` `.js` `.ps1` 等 | 勾选 |
@@ -117,7 +118,8 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 - 每行一个 checkbox；
 - 组头三态：`all / some / none`；
 - 勾文件夹 → 递归勾上全部后代；勾/取消一个文件 → 回算所有上层文件夹的三态；
-- 底部「恢复默认勾选 / 全选 / 全部取消」；
+- 底部「恢复默认 (N) / 全选可删 (N) / 全部取消」；
+- 上方「允许勾选并删除交付物」解锁后，`keep` 项可勾，按钮变「全选全部 (N)」；选中交付物时删除需要二次确认，请求带 `allowDeliverables: true`；
 - 体积按**最外层选中项**求和，父子同时选中不重复计。
 
 规则文件：包内 `rules.json` 是默认值；`$DSH_HOME/state/wrapup-rules.json` 存在时逐项覆盖（不必抄全文）。
@@ -146,7 +148,7 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 
 补充：
 
-- 文件夹里有交付物时扫描阶段已 `keep`，Host 收到路径会再拒一次并说明原因；就算文件夹本身没被标 `keep`，Host 也会检查它下面有没有交付物，有就拒绝整包删；
+- 文件夹里有交付物时扫描阶段已 `keep`，Host 默认收到路径会再拒一次并说明原因；只有请求显式带 `allowDeliverables: true`（界面解锁并二次确认后才带）才放行；就算文件夹本身没被标 `keep`，Host 也会检查它下面有没有交付物；
 - 父子同时传入时只挪最外层，子项不会重复删；
 - 删除后只清理**这次删除路径上**、且属于 `pruneCandidates`（本次会话新建的目录）的**已经空了**的目录。没有被勾选的新建空目录、以及用户原有的空文件夹都不会动。
 
@@ -159,7 +161,7 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 | GET | `/wrapup-panel/health` | 存活探针、版本、账本数量 |
 | GET | `/wrapup-panel/scan?session=&sweep=0` | 清单 + `idleMs` + 是否已记账；`sweep=0` 关兜底 |
 | GET | `/wrapup-panel/queue?session=` | 轮询用：闲置时长与记账状态 |
-| POST | `/wrapup-panel/delete` | `{session, paths[]}` → 收进回收站 |
+| POST | `/wrapup-panel/delete` | `{session, paths[], allowDeliverables?}` → 收进回收站 |
 | POST | `/wrapup-panel/deliver` | `{session, dirName?}` → 把交付物收进 `<deliverDir>/<会话标题>` |
 | POST | `/wrapup-panel/mark` | `{session, keep[], title}` 记账；10 秒内写过 → 409 |
 | POST | `/wrapup-panel/unmark` | 撤销记账 |
@@ -210,7 +212,8 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 | 按钮不出现 | 页面刷新；旧插件是否还开着（两个按钮） |
 | 扫描结果为空 | 会话 id 对不对；工作目录是否在 `$DSH_HOME` 下（会被排除） |
 | 有文件没列出来 | 是否被 `maxDepth/maxFiles` 截断（看面板警告）；是否在点开头目录/依赖目录；是否早于会话开始 |
-| 文件夹删不掉 | 是否 `keep`（内含交付物）；是否工作区本身/上级 |
+| 交付物/文件夹勾不动 | 是否 `keep`；勾上方「允许勾选并删除交付物」解锁 |
+| 成品目录里别的对话的文件 | 只列当前会话的 `成品/<本会话标题>/`；其他子文件夹整棵忽略 |
 | 删完目录还在 | 目录不是本次会话新建的（不在 `pruneCandidates`），按设计保留 |
 | 记账后会话没消失 | 闲置未满 30 分钟；要等下次启动 DSH |
 | 改完没生效 | `client.js` 刷新页面；`index.js`/`lib/` 重载插件或重启 |

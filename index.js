@@ -24,7 +24,7 @@ import { HOME, IDLE_DELETE_MS, IDLE_REFUSE_MS, PATHS, isValidSessionId, normPath
 export const name = 'wrapup-panel'
 export const inject = ['webServer']
 
-const VERSION = '1.3.1'
+const VERSION = '1.3.2'
 const MAX_BODY = 1024 * 1024
 const PREFIX = '/wrapup-panel'
 
@@ -86,6 +86,7 @@ function sameOrigin(req) {
  */
 function deleteByPaths(session, paths, options = {}) {
   if (!isValidSessionId(session)) throw new Error('会话 id 不合法')
+  const allowDeliverables = options.allowDeliverables === true
   const listed = (Array.isArray(paths) ? paths : []).filter((value) => typeof value === 'string' && value !== '')
   if (!listed.length) throw new Error('没有选中任何文件')
   // 和面板用同样的扫描口径（含兜底扫描），否则靠兜底才发现的文件删不掉
@@ -100,12 +101,12 @@ function deleteByPaths(session, paths, options = {}) {
       missing.push(path)
       continue
     }
-    if (hit.keep) {
+    if (hit.keep && !allowDeliverables) {
       refused.push({ path: hit.path, reason: hit.why })
       continue
     }
     // 文件夹整包删之前再看一眼：里面只要还有交付物，就不许整个搬走。
-    if (hit.type === 'dir') {
+    if (hit.type === 'dir' && !allowDeliverables) {
       const base = `${normPath(hit.path)}/`
       const kept = fresh.items.filter(
         (other) => other.keep && normPath(other.path).startsWith(base),
@@ -119,7 +120,10 @@ function deleteByPaths(session, paths, options = {}) {
   }
   if (!selected.length) {
     if (refused.length) {
-      throw new Error(`选中的文件夹里有交付物，不能整包删：${refused.map((item) => item.path).join('；')}`)
+      throw new Error(
+        `有 ${refused.length} 项被保护，没有删除：` +
+          refused.map((item) => `${item.path}（${item.reason}）`).join('；'),
+      )
     }
     throw new Error('选中的文件已经不在清单里了（可能被删或改名），重新打开一次面板')
   }
@@ -218,7 +222,13 @@ async function handle(req, res, config) {
 
   try {
     if (path === '/delete') {
-      return ok(res, deleteByPaths(body.session, body.paths, { sweep: body.sweep !== false }))
+      return ok(
+        res,
+        deleteByPaths(body.session, body.paths, {
+          sweep: body.sweep !== false,
+          allowDeliverables: body.allowDeliverables === true,
+        }),
+      )
     }
     if (path === '/deliver') {
       return ok(res, deliverBySession(body.session, {
