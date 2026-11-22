@@ -43,18 +43,22 @@
 做图、做 PPT 时，成品常常散在工作区各个子目录里。面板底部有一个 **收进成品 (N)** 按钮：
 
 - 只处理 **交付物**（`keep` 的文件），中间脚本、临时文件、文件夹都不会被搬；
-- 目标默认是 **`<会话工作区>/成品/`**，按钮上写着数量，鼠标悬停能看到目标目录；
+- 目标默认是 **`<会话工作区>/成品/<会话标题>/`**，每次对话一个子文件夹，按钮悬停能看到完整落点；
+- 标题里的 `: / \ ? *` 等 Windows 非法字符会被替换，过长会截断；没标题时用 `session-xxxxxxxx`；
 - 重名自动加 ` (1)`、` (2)`，不覆盖已有文件；
-- 已经在 `成品/` 里的会跳过，重复点不会套娃；
+- 已经在成品文件夹里的会跳过，重复点不会套娃；
 - 搬完只收掉「这次搬空的、原本就是本次会话新建的」空目录；
 - 目标目录必须在工作区内，`../成品` 这种会被拒绝。
 
-想改目录名：在 `rules.json` 里改 `deliverDir`（默认 `"成品"`），或在 `$DSH_HOME/state/wrapup-rules.json` 里只覆盖这一项。命令行同样能做：
+两个标题相同的会话会落进同一个子文件夹，文件重名时照样加序号。想让所有交付物直接摊在 `成品/` 里、不按会话分子文件夹：把 `deliverPerSession` 改成 `false`，或命令行加 `--flat`。
+
+想改父目录名：在 `rules.json` 里改 `deliverDir`（默认 `"成品"`），或在 `$DSH_HOME/state/wrapup-rules.json` 里只覆盖这一项。命令行同样能做：
 
 ```bash
-node bin/wrapup.mjs deliver --session <id>          # 真搬
+node bin/wrapup.mjs deliver --session <id>          # 真搬，自动套会话子文件夹
 node bin/wrapup.mjs deliver --session <id> --dry    # 只看会搬哪些
 node bin/wrapup.mjs deliver --session <id> --to 成品
+node bin/wrapup.mjs deliver --session <id> --flat   # 不套会话子文件夹
 ```
 
 搬错了也不要紧：成品只是普通文件夹，把文件挪回原处即可；这一步不经过回收站，也不删任何东西。
@@ -154,13 +158,36 @@ lib/artifacts.mjs 会话日志 → 文件/文件夹集合（只读）
 lib/classify.mjs  分类规则与加载/覆盖
 lib/scan.mjs      组装清单（纯计算，无缓存）
 lib/trash.mjs     两阶段删除，唯一会 rename 文件的地方
-lib/deliver.mjs   交付物归集：只把 keep 文件挪进「成品」
+lib/deliver.mjs   交付物归集：只把 keep 文件挪进「成品/<会话标题>」
 lib/queue.mjs     收尾账本 wrapper
 lib/sessions.mjs  判活、删会话、同步 workspace.json、启动清理
 bin/wrapup.mjs    命令行入口
 rules.json        默认分类规则
 test/             核心行为的回归测试
 ```
+
+**想改什么，直接查这张表**（不用读完整份代码）：
+
+| 你想改的 | 去这个文件 | 找什么 |
+| --- | --- | --- |
+| 面板分组顺序、组名、组说明 | `client.js` | `GROUP_ORDER`、`GROUP_HINT` |
+| 勾选/三态/父子联动 | `client.js` | `toggle`、`markSubtree`、`groupState`、`selectAll` |
+| 颜色、间距、按钮样式 | `client.js` | `styles` |
+| 底部按钮、文案、删除结果提示 | `client.js` | `WrapupDialog` 底部 `footer` 一段 |
+| 加一条 HTTP 路由 / 改参数校验 | `index.js` | `handle()`、`path === '/delete'` 附近的白名单 |
+| 哪些后缀算交付物/临时/脚本 | `rules.json` | `deliverableExt`、`tempExt`、`scriptExt` |
+| 扫多深、最多扫多少个 | `rules.json` | `sweep.maxDepth`、`sweep.maxFiles` |
+| 成品目录名、是否按对话分子文件夹 | `rules.json` | `deliverDir`、`deliverPerSession` |
+| 多久算「还在写」、回收站留几天 | `lib/config.mjs` | `IDLE_REFUSE_MS`、`IDLE_DELETE_MS` |
+| 回收站目录结构、落地路径 | `lib/trash.mjs` | `trashPaths()`、`landing()` |
+| 命令行新子命令 | `bin/wrapup.mjs` | `switch (command)`、`commandXxx()` |
+| 解析会话日志（多帧 zstd） | `lib/artifacts.mjs` | `decompressFrames()`、`parseRecords()` |
+
+三条约定，改之前先记住：
+
+1. **能改配置就别改代码** —— 分类、扫描上限、成品目录都在 `rules.json`，你的覆盖写在 `$DSH_HOME/state/wrapup-rules.json`，升级不会被冲掉。
+2. **磁盘操作只许发生在 `lib/trash.mjs` 和 `lib/deliver.mjs`**，而且都先 `rename` 再考虑复制；别在 `client.js` 或 `index.js` 里直接 `fs`。
+3. **界面和命令行共用同一批 `lib/` 函数** —— 加功能时先写 lib，再分别接 `index.js` 和 `bin/wrapup.mjs`，不要各写一份。
 
 **设计约束：①、②、④ 都只调用 ③，不各写一份逻辑。** 所以「为什么命令行和面板结果一样」不是巧合，是结构保证的。
 

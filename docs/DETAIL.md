@@ -34,7 +34,7 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 | `lib/classify.mjs` | 路径 + 规则 | `{kind, keep, why, defaultDelete}` | 只判断，不碰磁盘 |
 | `lib/scan.mjs` | 会话 id | 完整清单 + 警告 | 纯计算、无缓存，每次都是实时 |
 | `lib/trash.mjs` | 路径列表 | 回收站批次、失败列表 | **唯一会 rename 的地方** |
-| `lib/deliver.mjs` | 清单 + 成品目录名 | 搬迁结果、跳过/失败列表 | 只搬 `keep` 文件，不碰其他条目 |
+| `lib/deliver.mjs` | 清单 + 成品目录名 | 搬迁结果、跳过/失败列表 | 只搬 `keep` 文件；按标题清洗出会话子文件夹 |
 | `lib/queue.mjs` | 会话 id + 保留清单 | 账本条目 | 记账/撤销，不做磁盘删除 |
 | `lib/sessions.mjs` | 会话 id | 判活、挪会话、同步索引 | 启动清理与「还在写」判断 |
 
@@ -46,7 +46,7 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 2. 面板向 Host 请求 `/wrapup-panel/scan?session=<id>`，Host 读会话日志、组装清单。
 3. 你勾选 → 面板把**最外层路径**发回 `/delete`。文件夹只发它自己，里面的文件由 Host 整包带走。
 4. Host **重新扫描一遍**，按路径匹配后 rename 进 `_trash/<时间戳>/wrapup/`；随后只清理「这次会话新建、现在已经空了」的目录。
-5. 若点「收进成品」，面板调 `/deliver`：Host 现扫一遍，把 `keep` 的文件 rename 进 `<工作区>/<deliverDir>`，重名加序号，搬空的新建目录顺手收掉。
+5. 若点「收进成品」，面板调 `/deliver`：Host 现扫一遍，把 `keep` 的文件 rename 进 `<工作区>/<deliverDir>/<会话标题>`（`deliverPerSession=false` 时少一层），重名加序号，搬空的新建目录顺手收掉。
 6. 若点「删掉并收尾会话」，再 `/mark` 记账。
 7. 之后某次启动 DSH，插件等 90 秒（避开启动高峰）读账本：闲置满 30 分钟的会话日志挪进 `_trash`，并同步 `workspace.json`。
 
@@ -159,7 +159,7 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 | GET | `/wrapup-panel/scan?session=&sweep=0` | 清单 + `idleMs` + 是否已记账；`sweep=0` 关兜底 |
 | GET | `/wrapup-panel/queue?session=` | 轮询用：闲置时长与记账状态 |
 | POST | `/wrapup-panel/delete` | `{session, paths[]}` → 收进回收站 |
-| POST | `/wrapup-panel/deliver` | `{session, dirName?}` → 把交付物收进成品文件夹 |
+| POST | `/wrapup-panel/deliver` | `{session, dirName?}` → 把交付物收进 `<deliverDir>/<会话标题>` |
 | POST | `/wrapup-panel/mark` | `{session, keep[], title}` 记账；10 秒内写过 → 409 |
 | POST | `/wrapup-panel/unmark` | 撤销记账 |
 
@@ -169,10 +169,10 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 
 ```json
 {
-  "dest": "…/成品",
-  "dirName": "成品",
+  "dest": "…/成品/季度报告",
+  "dirName": "成品/季度报告",
   "apply": true,
-  "moved": [{ "from": "…/a.png", "to": "…/成品/a.png", "size": 1234 }],
+  "moved": [{ "from": "…/a.png", "to": "…/成品/季度报告/a.png", "size": 1234 }],
   "skipped": [{ "path": "…", "why": "已经在成品文件夹里" }],
   "failed": [],
   "bytes": 1234,
@@ -180,7 +180,7 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 }
 ```
 
-归集只处理 `type==='file' && keep===true` 的条目；重名在扩展名前加 ` (n)`；目标目录必须在 `cwd` 内，否则直接报错。
+归集只处理 `type==='file' && keep===true` 的条目；重名在扩展名前加 ` (n)`；目标目录必须在 `cwd` 内，否则直接报错。子文件夹名由 `sessionFolderName(title, sessionId)` 清洗：替换 Windows 非法字符、合并空白、最多 48 个字符、空标题回退 `session-xxxxxxxx`；标题相同会共用同一个子文件夹。
 
 ### `/delete` 返回
 

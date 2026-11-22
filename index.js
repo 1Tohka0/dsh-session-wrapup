@@ -24,7 +24,7 @@ import { HOME, IDLE_DELETE_MS, IDLE_REFUSE_MS, PATHS, isValidSessionId, normPath
 export const name = 'wrapup-panel'
 export const inject = ['webServer']
 
-const VERSION = '1.2.0'
+const VERSION = '1.3.0'
 const MAX_BODY = 1024 * 1024
 const PREFIX = '/wrapup-panel'
 
@@ -153,6 +153,8 @@ function deliverBySession(session, options = {}) {
   const fresh = scanSession(session, { sweep: options.sweep !== false })
   return deliverItems(fresh, {
     dirName: options.dirName || fresh.deliverDir || '成品',
+    // 默认每次对话一个子文件夹；传空字符串可以摊平
+    subdir: options.subdir !== undefined ? options.subdir : fresh.deliverFolder,
     apply: options.apply !== false,
   })
 }

@@ -5,6 +5,12 @@
  * Host half which files this conversation produced, groups them by purpose, and
  * lets the user tick what to delete. Nothing is scanned in the browser: the
  * Host route `/wrapup-panel/*` owns the filesystem and the trash.
+ *
+ * 在这个文件里找：
+ *   GROUP_ORDER / GROUP_HINT  分组顺序与组说明
+ *   styles                    所有颜色、间距、按钮样式
+ *   WrapupDialog              面板主体（load / 勾选 / runDelete / runDeliver）
+ *   文件末尾                  标题栏「🧹 收尾」按钮与挂载
  */
 
 window.__ModuleLoader__.load({
@@ -354,6 +360,10 @@ window.__ModuleLoader__.load({
         () => items.filter((item) => item.type === 'file' && item.keep),
         [items],
       )
+      // Host 在 rules.deliverPerSession 打开时会再按标题套一层子文件夹
+      const deliverTarget = payload?.deliverFolder
+        ? `${payload.deliverDir || '成品'}/${payload.deliverFolder}`
+        : payload?.deliverDir || '成品'
 
       /** 勾/取消一个条目；文件夹会带上全部下级，并回算上层文件夹的三态。 */
       const markSubtree = (target, item, on) => {
@@ -469,7 +479,7 @@ window.__ModuleLoader__.load({
 
 
       // 交付物归集：只动 keep 的文件，不碰勾选、不删会话。
-      // 目标目录由 Host 按 rules.deliverDir 解析（默认 <工作区>/成品）。
+      // 默认落到 <工作区>/<deliverDir>/<会话标题>/；目录名由 Host 统一清洗。
       const runDeliver = useCallback(async () => {
         setBusy(true)
         setError('')
@@ -658,7 +668,7 @@ window.__ModuleLoader__.load({
                   onClick: () => void runDeliver(),
                   disabled: busy || deliverables.length === 0,
                   title: deliverables.length
-                    ? `把 ${deliverables.length} 个交付物挪进「${payload?.deliverDir || '成品'}」`
+                    ? `把 ${deliverables.length} 个交付物挪进「${deliverTarget}」`
                     : '这次没有识别到交付物',
                 },
                 busy ? '处理中…' : `收进成品 (${deliverables.length})`,

@@ -16,7 +16,7 @@ mkdirSync(process.env.DSH_HOME, { recursive: true })
 
 const { measureTree, sweepWorkspace } = await import('../lib/artifacts.mjs')
 const { pruneEmptyDirs, trashPaths } = await import('../lib/trash.mjs')
-const { deliverItems } = await import('../lib/deliver.mjs')
+const { deliverItems, sessionFolderName } = await import('../lib/deliver.mjs')
 
 let workspace
 
@@ -140,6 +140,46 @@ test('交付物归集预览不挪文件，且拒绝把成品目录放到工作�
   assert.equal(existsSync(join(cwd, '成品')), false)
 
   assert.throws(() => deliverItems(scan, { dirName: '../outside', apply: false }), /工作区/)
+})
+
+test('交付物按会话标题落进独立子文件夹', () => {
+  const cwd = join(root, 'deliver-sub')
+  mkdirSync(cwd, { recursive: true })
+  const file = join(cwd, 'report.pdf')
+  writeFileSync(file, 'pdf')
+  const scan = { cwd, items: [{ type: 'file', path: file, keep: true, size: 3 }] }
+
+  const result = deliverItems(scan, { subdir: sessionFolderName('季度 报告', 'session-1234'), apply: true })
+  assert.equal(result.dest, join(cwd, '成品', '季度 报告'))
+  assert.equal(result.dirName, '成品/季度 报告')
+  assert.equal(existsSync(join(cwd, '成品', '季度 报告', 'report.pdf')), true)
+  assert.equal(existsSync(file), false)
+})
+
+test('已经在成品目录里的交付物不再搬第二次', () => {
+  const cwd = join(root, 'deliver-already')
+  const other = join(cwd, '成品', '别的会话')
+  mkdirSync(other, { recursive: true })
+  const file = join(other, 'done.png')
+  writeFileSync(file, 'png')
+  const scan = { cwd, items: [{ type: 'file', path: file, keep: true, size: 3 }] }
+
+  const result = deliverItems(scan, { subdir: '本期', apply: true })
+  assert.equal(result.moved.length, 0)
+  assert.equal(result.skipped.length, 1)
+  assert.match(result.skipped[0].why, /已经在成品/)
+  assert.equal(existsSync(file), true)
+  assert.equal(existsSync(join(cwd, '成品', '本期')), false, '没有可搬的文件就不该建空文件夹')
+})
+
+test('会话标题清洗成安全的 Windows 文件夹名', () => {
+  assert.equal(sessionFolderName('  报告: 2026/11  ', 'session-abcd'), '报告 2026 11')
+  assert.equal(sessionFolderName('', 'session-abcd1234'), 'session-abcd1234')
+  assert.equal(sessionFolderName('CON', 'session-abcd'), '会话-CON')
+  assert.equal(sessionFolderName('...', 'session-abcd'), 'session-abcd')
+  const long = sessionFolderName('长'.repeat(80), 'session-abcd')
+  assert.equal(Array.from(long).length, 48)
+  assert.equal(sessionFolderName('a\u0000b', 'session-abcd'), 'a b')
 })
 
 test('兜底扫描跳过浏览器配置目录', () => {

@@ -7,7 +7,7 @@
  *   node bin/wrapup.mjs scan   [--session <id>] [--no-sweep] [--json]
  *   node bin/wrapup.mjs delete --session <id> --paths "a;b;c" [--dry]
  *   node bin/wrapup.mjs delete --session <id> --all-deletable [--dry]
- *   node bin/wrapup.mjs deliver --session <id> [--to 成品] [--dry]
+ *   node bin/wrapup.mjs deliver --session <id> [--to 成品] [--flat] [--dry]
  *   node bin/wrapup.mjs mark   [--session <id>] [--keep "a;b"] [--force]
  *   node bin/wrapup.mjs unmark [--session <id>]
  *   node bin/wrapup.mjs status
@@ -150,6 +150,8 @@ function commandDeliver(options) {
   const payload = scanSession(id)
   const result = deliverItems(payload, {
     dirName: typeof options.to === 'string' ? options.to : payload.deliverDir,
+    // 默认按会话标题套一层子文件夹；--flat 才直接摊在「成品」里
+    subdir: options.flat === true ? '' : payload.deliverFolder,
     apply: options.dry !== true,
   })
   const prefix = options.dry === true ? '[预览] 将收进' : '[已收进]'
