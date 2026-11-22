@@ -15,9 +15,9 @@ README 讲「怎么用」，这一份讲「里面怎么转、改哪里、出错�
 ```
 client.js   ① 界面层：弹窗、分组、勾选状态、结果文案
    │  HTTP（同源、JSON）
-index.js    ② 接口层：六条路由、参数校验、把活交给 lib
+index.js    ② 接口层：七条路由、参数校验、把活交给 lib
    │  import
-lib/        ③ 大脑层：读日志 → 扫描 → 分类 → 删除 → 记账
+lib/        ③ 大脑层：读日志 → 扫描 → 分类 → 删除/归集 → 记账
    │  import
 bin/wrapup.mjs ④ 命令行：和界面共用 ③
 rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
@@ -34,6 +34,7 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 | `lib/classify.mjs` | 路径 + 规则 | `{kind, keep, why, defaultDelete}` | 只判断，不碰磁盘 |
 | `lib/scan.mjs` | 会话 id | 完整清单 + 警告 | 纯计算、无缓存，每次都是实时 |
 | `lib/trash.mjs` | 路径列表 | 回收站批次、失败列表 | **唯一会 rename 的地方** |
+| `lib/deliver.mjs` | 清单 + 成品目录名 | 搬迁结果、跳过/失败列表 | 只搬 `keep` 文件，不碰其他条目 |
 | `lib/queue.mjs` | 会话 id + 保留清单 | 账本条目 | 记账/撤销，不做磁盘删除 |
 | `lib/sessions.mjs` | 会话 id | 判活、挪会话、同步索引 | 启动清理与「还在写」判断 |
 
@@ -45,8 +46,9 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 2. 面板向 Host 请求 `/wrapup-panel/scan?session=<id>`，Host 读会话日志、组装清单。
 3. 你勾选 → 面板把**最外层路径**发回 `/delete`。文件夹只发它自己，里面的文件由 Host 整包带走。
 4. Host **重新扫描一遍**，按路径匹配后 rename 进 `_trash/<时间戳>/wrapup/`；随后只清理「这次会话新建、现在已经空了」的目录。
-5. 若点「删掉并收尾会话」，再 `/mark` 记账。
-6. 之后某次启动 DSH，插件等 90 秒（避开启动高峰）读账本：闲置满 30 分钟的会话日志挪进 `_trash`，并同步 `workspace.json`。
+5. 若点「收进成品」，面板调 `/deliver`：Host 现扫一遍，把 `keep` 的文件 rename 进 `<工作区>/<deliverDir>`，重名加序号，搬空的新建目录顺手收掉。
+6. 若点「删掉并收尾会话」，再 `/mark` 记账。
+7. 之后某次启动 DSH，插件等 90 秒（避开启动高峰）读账本：闲置满 30 分钟的会话日志挪进 `_trash`，并同步 `workspace.json`。
 
 ---
 
@@ -157,10 +159,28 @@ rules.json  ⑤ 规则层：分类后缀、目录名、扫描上限
 | GET | `/wrapup-panel/scan?session=&sweep=0` | 清单 + `idleMs` + 是否已记账；`sweep=0` 关兜底 |
 | GET | `/wrapup-panel/queue?session=` | 轮询用：闲置时长与记账状态 |
 | POST | `/wrapup-panel/delete` | `{session, paths[]}` → 收进回收站 |
+| POST | `/wrapup-panel/deliver` | `{session, dirName?}` → 把交付物收进成品文件夹 |
 | POST | `/wrapup-panel/mark` | `{session, keep[], title}` 记账；10 秒内写过 → 409 |
 | POST | `/wrapup-panel/unmark` | 撤销记账 |
 
 错误一律 `{ok:false, error:"中文原因"}`；成功是 `{ok:true, data:{...}}`。
+
+### `/deliver` 返回
+
+```json
+{
+  "dest": "…/成品",
+  "dirName": "成品",
+  "apply": true,
+  "moved": [{ "from": "…/a.png", "to": "…/成品/a.png", "size": 1234 }],
+  "skipped": [{ "path": "…", "why": "已经在成品文件夹里" }],
+  "failed": [],
+  "bytes": 1234,
+  "pruned": ["…/搬空的子目录"]
+}
+```
+
+归集只处理 `type==='file' && keep===true` 的条目；重名在扩展名前加 ` (n)`；目标目录必须在 `cwd` 内，否则直接报错。
 
 ### `/delete` 返回
 

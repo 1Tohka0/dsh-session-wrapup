@@ -10,19 +10,21 @@
  *   GET  /scan?session=     列出本次对话产生的文件
  *   GET  /queue?session=    这个会话有没有被记过账
  *   POST /delete            把勾选的文件收进回收站
+ *   POST /deliver           把交付物收进「成品」文件夹
  *   POST /mark              记账：这个会话收过尾了
  *   POST /unmark            撤销记账
  */
 import { markSession, readQueue, unmarkSession } from './lib/queue.mjs'
 import { scanSession } from './lib/scan.mjs'
 import { trashPaths } from './lib/trash.mjs'
+import { deliverItems } from './lib/deliver.mjs'
 import { finishQueued, isWriting, lastWriteMs, purgeOldTrash } from './lib/sessions.mjs'
 import { HOME, IDLE_DELETE_MS, IDLE_REFUSE_MS, PATHS, isValidSessionId, normPath } from './lib/config.mjs'
 
 export const name = 'wrapup-panel'
 export const inject = ['webServer']
 
-const VERSION = '1.1.0'
+const VERSION = '1.2.0'
 const MAX_BODY = 1024 * 1024
 const PREFIX = '/wrapup-panel'
 
@@ -142,6 +144,19 @@ function deleteByPaths(session, paths, options = {}) {
   }
 }
 
+/**
+ * 把交付物收进成品文件夹。
+ * 每次现扫一遍：面板上的勾选可能已经过期，交付物以「此刻磁盘」为准。
+ */
+function deliverBySession(session, options = {}) {
+  if (!isValidSessionId(session)) throw new Error('会话 id 不合法')
+  const fresh = scanSession(session, { sweep: options.sweep !== false })
+  return deliverItems(fresh, {
+    dirName: options.dirName || fresh.deliverDir || '成品',
+    apply: options.apply !== false,
+  })
+}
+
 async function handle(req, res, config) {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
   const path = url.pathname.slice(PREFIX.length) || '/'
@@ -189,7 +204,7 @@ async function handle(req, res, config) {
   }
 
   if (req.method !== 'POST') return fail(res, 405, '不支持的方法')
-  if (!['/delete', '/mark', '/unmark'].includes(path)) return fail(res, 404, '没有这个接口')
+  if (!['/delete', '/deliver', '/mark', '/unmark'].includes(path)) return fail(res, 404, '没有这个接口')
   if (!sameOrigin(req)) return fail(res, 403, '跨源请求被拒绝')
 
   let body
@@ -202,6 +217,12 @@ async function handle(req, res, config) {
   try {
     if (path === '/delete') {
       return ok(res, deleteByPaths(body.session, body.paths, { sweep: body.sweep !== false }))
+    }
+    if (path === '/deliver') {
+      return ok(res, deliverBySession(body.session, {
+        sweep: body.sweep !== false,
+        dirName: typeof body.dirName === 'string' ? body.dirName : undefined,
+      }))
     }
     if (!isValidSessionId(body.session)) throw new Error('会话 id 不合法')
     if (path === '/mark') {

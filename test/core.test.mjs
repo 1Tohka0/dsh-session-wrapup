@@ -14,8 +14,9 @@ const root = mkdtempSync(join(tmpdir(), 'wrapup-test-'))
 process.env.DSH_HOME = join(root, 'home')
 mkdirSync(process.env.DSH_HOME, { recursive: true })
 
-const { measureTree } = await import('../lib/artifacts.mjs')
+const { measureTree, sweepWorkspace } = await import('../lib/artifacts.mjs')
 const { pruneEmptyDirs, trashPaths } = await import('../lib/trash.mjs')
+const { deliverItems } = await import('../lib/deliver.mjs')
 
 let workspace
 
@@ -90,4 +91,68 @@ test('拒绝删工作区本身或它的上级', () => {
   const result = trashPaths([workspace], { apply: false, cwd: workspace })
   assert.equal(result.moved.length, 0)
   assert.match(result.failed[0].error, /工作区本身|上级/)
+})
+
+test('交付物收进成品：重名加序号、非交付物不动、空目录收掉', () => {
+  const cwd = join(root, 'deliver-case')
+  const nested = join(cwd, 'sub')
+  mkdirSync(nested, { recursive: true })
+  const first = join(cwd, 'a.png')
+  const second = join(nested, 'a.png')
+  const junk = join(cwd, 'x.tmp')
+  writeFileSync(first, 'one')
+  writeFileSync(second, 'two')
+  writeFileSync(junk, 'tmp')
+
+  const scan = {
+    cwd,
+    items: [
+      { type: 'file', path: first, keep: true, size: 3 },
+      { type: 'file', path: second, keep: true, size: 3 },
+      { type: 'file', path: junk, keep: false, size: 3 },
+    ],
+    pruneCandidates: [nested],
+  }
+  const result = deliverItems(scan, { apply: true })
+
+  assert.equal(result.dest, join(cwd, '成品'))
+  assert.equal(result.moved.length, 2)
+  assert.equal(result.bytes, 6)
+  assert.equal(existsSync(join(cwd, '成品', 'a.png')), true)
+  assert.equal(existsSync(join(cwd, '成品', 'a (1).png')), true)
+  assert.equal(readFileSync(join(cwd, '成品', 'a.png'), 'utf8'), 'one')
+  assert.equal(existsSync(first), false)
+  assert.equal(existsSync(second), false)
+  assert.equal(existsSync(junk), true, '不是交付物的文件不能被搬走')
+  assert.equal(existsSync(nested), false, '搬空的源目录应该被收掉')
+})
+
+test('交付物归集预览不挪文件，且拒绝把成品目录放到工作区外', () => {
+  const cwd = join(root, 'deliver-dry')
+  mkdirSync(cwd, { recursive: true })
+  const file = join(cwd, 'b.pdf')
+  writeFileSync(file, 'pdf')
+  const scan = { cwd, items: [{ type: 'file', path: file, keep: true, size: 3 }] }
+
+  const preview = deliverItems(scan, { apply: false })
+  assert.equal(preview.moved.length, 1)
+  assert.equal(existsSync(file), true)
+  assert.equal(existsSync(join(cwd, '成品')), false)
+
+  assert.throws(() => deliverItems(scan, { dirName: '../outside', apply: false }), /工作区/)
+})
+
+test('兜底扫描跳过浏览器配置目录', () => {
+  const cwd = join(root, 'sweep-case')
+  const profile = join(cwd, 'edgeprofile')
+  mkdirSync(join(profile, 'Default', 'Cache'), { recursive: true })
+  writeFileSync(join(profile, 'Local State'), '{}')
+  writeFileSync(join(profile, 'Default', 'Cache', 'data_0'), 'cache')
+  writeFileSync(join(cwd, 'normal.txt'), 'hi')
+
+  const result = sweepWorkspace(cwd, Date.now() - 60_000)
+  assert.equal(result.skippedProfiles, 1)
+  const paths = [...result.files.values()].map((file) => file.path)
+  assert.ok(paths.some((path) => path.endsWith('normal.txt')))
+  assert.ok(!paths.some((path) => path.includes('edgeprofile')), 'profile 里的缓存文件不该进清单')
 })

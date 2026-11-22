@@ -7,6 +7,7 @@
  *   node bin/wrapup.mjs scan   [--session <id>] [--no-sweep] [--json]
  *   node bin/wrapup.mjs delete --session <id> --paths "a;b;c" [--dry]
  *   node bin/wrapup.mjs delete --session <id> --all-deletable [--dry]
+ *   node bin/wrapup.mjs deliver --session <id> [--to 成品] [--dry]
  *   node bin/wrapup.mjs mark   [--session <id>] [--keep "a;b"] [--force]
  *   node bin/wrapup.mjs unmark [--session <id>]
  *   node bin/wrapup.mjs status
@@ -18,6 +19,7 @@ import { HOME, IDLE_DELETE_MS, IDLE_REFUSE_MS, isValidSessionId } from '../lib/c
 import { humanSize } from '../lib/classify.mjs'
 import { scanSession } from '../lib/scan.mjs'
 import { trashPaths } from '../lib/trash.mjs'
+import { deliverItems } from '../lib/deliver.mjs'
 import { markSession, readQueue, unmarkSession } from '../lib/queue.mjs'
 import { finishQueued, isWriting } from '../lib/sessions.mjs'
 
@@ -138,6 +140,34 @@ function commandDelete(options) {
   for (const failed of result.failed) console.log(`  ! ${failed.path}: ${failed.error}`)
 }
 
+
+function commandDeliver(options) {
+  const id = sessionId(options)
+  if (!isValidSessionId(id)) {
+    console.error('会话 id 不合法：需要 --session session-<uuid>')
+    process.exit(2)
+  }
+  const payload = scanSession(id)
+  const result = deliverItems(payload, {
+    dirName: typeof options.to === 'string' ? options.to : payload.deliverDir,
+    apply: options.dry !== true,
+  })
+  const prefix = options.dry === true ? '[预览] 将收进' : '[已收进]'
+  console.log(`${prefix} ${result.dest}`)
+  if (!result.moved.length && !result.skipped.length && !result.failed.length) {
+    console.log('这次没有识别到交付物')
+    return
+  }
+  for (const moved of result.moved) {
+    console.log(`  - ${moved.from}`)
+    console.log(`    → ${moved.to}`)
+  }
+  console.log(`共 ${result.moved.length} 个文件，${humanSize(result.bytes)}`)
+  for (const skipped of result.skipped) console.log(`  · 跳过 ${skipped.path}：${skipped.why}`)
+  for (const failed of result.failed) console.log(`  ! ${failed.path}：${failed.error}`)
+  for (const dir of result.pruned) console.log(`  - 空文件夹 ${dir}`)
+}
+
 function commandMark(options) {
   const id = sessionId(options)
   if (!isValidSessionId(id)) {
@@ -205,6 +235,9 @@ function dispatch(command, options) {
     break
   case 'delete':
     commandDelete(options)
+    break
+  case 'deliver':
+    commandDeliver(options)
     break
   case 'mark':
     commandMark(options)

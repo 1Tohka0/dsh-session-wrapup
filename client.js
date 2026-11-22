@@ -350,6 +350,10 @@ window.__ModuleLoader__.load({
         [selectedItems],
       )
       const pickedBytes = selectedRoots.reduce((sum, item) => sum + (item.size || 0), 0)
+      const deliverables = useMemo(
+        () => items.filter((item) => item.type === 'file' && item.keep),
+        [items],
+      )
 
       /** 勾/取消一个条目；文件夹会带上全部下级，并回算上层文件夹的三态。 */
       const markSubtree = (target, item, on) => {
@@ -462,6 +466,33 @@ window.__ModuleLoader__.load({
         },
         [items, load, payload, selectedRoots, sessionId],
       )
+
+
+      // 交付物归集：只动 keep 的文件，不碰勾选、不删会话。
+      // 目标目录由 Host 按 rules.deliverDir 解析（默认 <工作区>/成品）。
+      const runDeliver = useCallback(async () => {
+        setBusy(true)
+        setError('')
+        setMessage('')
+        try {
+          const result = await postJson('/deliver', { session: sessionId })
+          let text =
+            result.moved.length > 0
+              ? `已把 ${result.moved.length} 个交付物收进 ${result.dest}，${humanSize(result.bytes)}`
+              : `没有可收的交付物（目标：${result.dest}）`
+          if (result.skipped?.length) text += `\n跳过 ${result.skipped.length} 个：${result.skipped.map((item) => item.why).join('；')}`
+          if (result.pruned?.length) text += `\n顺手清掉 ${result.pruned.length} 个空文件夹`
+          if (result.failed?.length) {
+            text += '\n' + result.failed.map((item) => `! ${item.path}：${item.error}`).join('\n')
+          }
+          setMessage(text)
+          await load()
+        } catch (caught) {
+          setError(String(caught?.message ?? caught))
+        } finally {
+          setBusy(false)
+        }
+      }, [load, sessionId])
 
       // 每 2.5 秒问一次服务器「现在多久没写了」。
       // 只靠打开面板时的快照会过期 —— AI 可能在扫描之后又开始写，快照就会把按钮
@@ -619,6 +650,18 @@ window.__ModuleLoader__.load({
                   : payload?.skippedHome
                     ? `另有 ${payload.skippedHome} 个 DSH 自身数据文件不在清单里。`
                     : '删除是两阶段的：文件先挪进 home\\_trash，3 天后才真正消失。',
+              ),
+              h(
+                'button',
+                {
+                  style: styles.button,
+                  onClick: () => void runDeliver(),
+                  disabled: busy || deliverables.length === 0,
+                  title: deliverables.length
+                    ? `把 ${deliverables.length} 个交付物挪进「${payload?.deliverDir || '成品'}」`
+                    : '这次没有识别到交付物',
+                },
+                busy ? '处理中…' : `收进成品 (${deliverables.length})`,
               ),
               h('button', { style: styles.button, onClick: selectDeletable, disabled: busy }, '恢复默认勾选'),
               h('button', { style: styles.button, onClick: selectAll, disabled: busy }, '全选'),
